@@ -34,8 +34,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -161,5 +160,113 @@ public class TransferControllerTests {
         assertThat(response.getContentAsString()).isEqualTo(jsonTransfer.write(newTransfer).getJson());
         assertThat(accountService.findAccountById(1000).getBalance().equals(new BigDecimal(900.00)));
         assertThat(accountService.findAccountById(1001).getBalance().equals(new BigDecimal(1100.00)));
+    }
+
+    @Test
+    @WithMockUser(username = "test user", password = "password", roles = "USER")
+    public void should_Request_Transfer() throws Exception {
+        TransferDto transferDto = new TransferDto();
+        transferDto.setAccountFromId(1001);
+        transferDto.setAccountToId(1000);
+        transferDto.setAmount(new BigDecimal(100.00));
+
+        when(userService.getUserByUsername(anyString())).thenReturn(userOne);
+
+        Transfer newTransfer = new
+                Transfer(TransferType.REQUEST, TransferStatus.PENDING, 1001, 1000, new BigDecimal(100.00));
+
+        when(transferService.initiateRequestTransfer(1001, 1000, new BigDecimal(100.00)))
+                .thenReturn(newTransfer);
+
+        MockHttpServletResponse response = mvc.perform(
+                post(base.toString() + "/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonTransferDto.write(transferDto).getJson())
+        ).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED.value());
+        assertThat(response.getContentAsString()).isEqualTo(jsonTransfer.write(newTransfer).getJson());
+    }
+
+    @Test
+    @WithMockUser(username = "test user", password = "password", roles = "USER")
+    public void should_Approve_Transfer() throws Exception {
+        when(userService.getUserByUsername(anyString())).thenReturn(userOne);
+
+        ArgumentCaptor<Integer> arg1 = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<BigDecimal> arg2 = ArgumentCaptor.forClass(BigDecimal.class);
+
+        doNothing().when(accountService).withdraw(arg1.capture(), arg2.capture());
+
+        accountService.withdraw(1001, new BigDecimal(100.00));
+
+        account.setBalance(account.getBalance().subtract(arg2.getValue()));
+
+        doNothing().when(accountService).deposit(arg1.capture(), arg2.capture());
+
+        accountService.deposit(1000, new BigDecimal(100.00));
+
+        accountTwo.setBalance(accountTwo.getBalance().add(arg2.getValue()));
+
+        when(accountService.findAccountById(1000)).thenReturn(account);
+        when(accountService.findAccountById(1001)).thenReturn(accountTwo);
+
+
+        Transfer newTransfer = new
+                Transfer(TransferType.REQUEST, TransferStatus.APPROVED, 1001, 1000, new BigDecimal(100.00));
+
+        when(transferService.acceptRequestTransfer(newTransfer.getId())).thenReturn(newTransfer);
+
+        MockHttpServletResponse response = mvc.perform(
+                put(base.toString() + "/request/" + newTransfer.getId() + "/accept")
+        ).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.ACCEPTED.value());
+        assertThat(response.getContentAsString()).isEqualTo(jsonTransfer.write(newTransfer).getJson());
+        assertThat(accountService.findAccountById(1000).getBalance().equals(new BigDecimal(900.00)));
+        assertThat(accountService.findAccountById(1001).getBalance().equals(new BigDecimal(1100.00)));
+    }
+
+    @Test
+    @WithMockUser(username = "test user", password = "password", roles = "USER")
+    public void should_Reject_Transfer() throws Exception {
+        when(userService.getUserByUsername(anyString())).thenReturn(userOne);
+
+        when(accountService.findAccountById(1000)).thenReturn(account);
+        when(accountService.findAccountById(1001)).thenReturn(accountTwo);
+
+
+        Transfer newTransfer = new
+                Transfer(TransferType.REQUEST, TransferStatus.REJECTED, 1001, 1000, new BigDecimal(100.00));
+
+        when(transferService.rejectRequestTransfer(newTransfer.getId())).thenReturn(newTransfer);
+
+        MockHttpServletResponse response = mvc.perform(
+                put(base.toString() + "/request/" + newTransfer.getId() + "/reject")
+        ).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.ACCEPTED.value());
+        assertThat(response.getContentAsString()).isEqualTo(jsonTransfer.write(newTransfer).getJson());
+        assertThat(accountService.findAccountById(1000).getBalance().equals(new BigDecimal(1000.00)));
+        assertThat(accountService.findAccountById(1001).getBalance().equals(new BigDecimal(1000.00)));
+    }
+
+    @Test
+    @WithMockUser(username = "test user", password = "password", roles = "USER")
+    public void should_Return_Transfer() throws Exception {
+        when(userService.getUserByUsername(anyString())).thenReturn(userOne);
+
+        Transfer newTransfer = new
+                Transfer(TransferType.SEND, TransferStatus.APPROVED, 1001, 1000, new BigDecimal(100.00));
+
+        when(transferService.getTransferById(newTransfer.getId()))
+                .thenReturn(newTransfer);
+
+        MockHttpServletResponse response = mvc.perform(
+                get(base.toString() + "/" + newTransfer.getId() + "/details")
+        ).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK.value());
+        assertThat(response.getContentAsString()).isEqualTo(jsonTransfer.write(newTransfer).getJson());
     }
 }
